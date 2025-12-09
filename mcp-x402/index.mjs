@@ -51,6 +51,17 @@ const arrayOfSchemas = await SchemaImporter
 */
 
 
+console.log( process.argv.slice( 2 ) )
+const args = process.argv
+    .slice( 2 )
+    .filter( arg => arg.includes( '=' ) )
+    .reduce( ( acc, arg ) => {
+        const [ key, value ] = arg.split( '=' )
+        acc[ key.trim() ] = value.trim()
+        return acc
+    }, {} )
+const { port } = args
+
 const config = {
     'silent': false,
     'envPath': './../../.env',
@@ -69,6 +80,10 @@ const objectOfSchemaArrays = arrayOfRoutes
 
 
 const remoteServer = new RemoteServer( { silent } )
+remoteServer
+    .setConfig( { overwrite: { port: parseInt( port ) } } )
+
+
 const { routesActivationPayloads } = RemoteServer
     .prepareRoutesActivationPayloads( { arrayOfRoutes, objectOfSchemaArrays, envObject } )
     // .prepareRoutesActivationPayloads( { routes, arrayOfSchemas, envObject } )

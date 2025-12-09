@@ -5,7 +5,8 @@
   "main": "./src/index.mjs",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "server:mcp": "node ./mcp-x402/index.mjs"
+    "server:mcp:dev": "node ./mcp-x402/index.mjs port=8082",
+    "server:mcp:prod": "node ./mcp-x402/index.mjs port=80"
   },
   "keywords": [],
   "author": "",
