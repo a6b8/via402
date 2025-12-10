@@ -4,11 +4,12 @@ import { RemoteServer } from 'flowmcpServers'
 import { schema } from './schemas/avalanche.mjs'
 import { X402Middleware } from 'x402-mcp-middleware'
 import { ServerManager } from './helpers/ServerManager.mjs'
-
+import { HTML } from './helpers/HTML.mjs'
 
 const config = {
     'silent': false,
     'envPath': './../.via402.env',
+    'snowtraceAddressBaseUrl': 'https://testnet.snowtrace.io/address',
     'envSelection': [
         [ 'facilitatorPublicKey',  'X402_FACILITATOR_PUBLIC_KEY'   ],
         [ 'facilitatorPrivateKey', 'X402_FACILITATOR_PRIVATE_KEY'  ],
@@ -52,7 +53,7 @@ const config = {
 }
 
 
-const { silent, envPath, envSelection, arrayOfRoutes, x402 } = config
+const { silent, envPath, envSelection, arrayOfRoutes, x402, snowtraceAddressBaseUrl } = config
 const { routePath, chainId, chainName, restrictedCalls, paymentOptions, contracts } = x402
 
 const { port, environment } = ServerManager
@@ -79,12 +80,18 @@ const { routesActivationPayloads } = RemoteServer
 const middleware = await X402Middleware
     .create( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } )
 app.use( ( middleware ).mcp() )
-app.get( routePath, ( _, res ) => {
-    const txt = `X402 Remote Server v${managerVersion} is running!`
-    res.send( txt )
-} )
-
-
+HTML.start({
+    app,
+    routePath,
+    suffix: 'streamable',
+    schema,
+    restrictedCalls,
+    chainId,
+    chainName, // 'avax_fuji' from your config
+    facilitatorPublicKey: x402Credentials.facilitatorPublicKey,
+    payToAddress: x402Credentials.recepientAddress,
+    explorerAddressBaseUrl: snowtraceAddressBaseUrl
+})
 remoteServer
     .start( { routesActivationPayloads } )
 
