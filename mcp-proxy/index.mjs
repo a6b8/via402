@@ -1,38 +1,31 @@
-
-import { ServerManager } from './helpers/ServerManager.mjs'
-import { MCPStreamableProxyServer } from './proxies/MCPStreamableProxy.mjs'
-
-
-const { port: listenPort, environment } = ServerManager
-    .getArgs( { argv: process.argv } )
-const { upstreamUrl } = ServerManager
-    .getUpstreamUrl( { environment, defaultUrl: 'https://x402.flowmcp.org/mcp/streamable' } )
-
-
-const config = {
-    upstreamUrl,
-    'listenHost': '127.0.0.1',
-    listenPort,
-    'bearerToken': null,
-    'silent': false,
-}
-
-
-
+import { MCPStreamableProxyServer } from './proxies/MCPStreamableProxyServer.mjs'
+import { HTML } from './helpers/HTML.mjs'
 
 
 const proxy = new MCPStreamableProxyServer( {
-    upstreamUrl,
-    listenHost: config['listenHost'],
-    listenPort,
-    bearerToken: config['bearerToken'],
-    getPaymentHeader: ( originalRequest, response ) => {
-        console.log( 'Payment received callback' )
-        console.log( 'Original Request:', originalRequest  )
-        console.log( 'Response:', response  )
-        return {}
-    },
-    silent: config['silent']
+    listenHost: '127.0.0.1',
+    listenPort: 4001,
+    upstreamUrl: null,
+    allowedUpstreamHosts: [
+        'localhost',
+        'community.flowmcp.org',
+        'x402.flowmcp.org'
+    ],
+    getX402PaymentHeader: () => {}
 } )
+
+const app = proxy.getApp()
+
+HTML.start({
+    app,
+    routePath: '/dashboard',
+    suffix: 'token_validation',
+    apiPath: '/api/v1/agent_payz/token_validation',
+    allowedUpstreamHosts: [
+        'localhost',
+        'community.flowmcp.org',
+        'x402.flowmcp.org'
+    ]
+})
 
 await proxy.start()
