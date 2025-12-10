@@ -1,5 +1,5 @@
 class HTML {
-    static start({
+    static start( {
         app,
         routePath,
         suffix = 'streamable',
@@ -10,11 +10,12 @@ class HTML {
         facilitatorPublicKey,
         payToAddress,
         explorerAddressBaseUrl
-    }) {
+    } ) {
 
+        const { namespace } = schema
         const tools = Object
             .keys( schema['routes'] )
-            .map( routeName => ( { 'name': routeName, 'protected': null } ) )
+            .map( routeName => ( { 'name': routeName + `_${namespace}`, 'protected': null } ) )
             .map( tool => { 
                 const isProtected = restrictedCalls
                     .some( rc => rc['name'] === tool.name )
