@@ -6,9 +6,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "server:mcp:dev": "node ./mcp-x402/index.mjs port=8082 environment=development",
-    "server:mcp:prod": "node ./mcp-x402/index.mjs port=80 environment=production",
+    "server:mcp:prod": "node ./mcp-x402/index.mjs port=443 environment=production",
     "server:proxy:dev": "node ./mcp-proxy/index.mjs port=8081 environment=development",
-    "server:proxy:prod": "node ./mcp-proxy/index.mjs port=80 environment=production"
+    "server:proxy:prod": "node ./mcp-proxy/index.mjs port=443 environment=production"
   },
   "keywords": [],
   "author": "",
