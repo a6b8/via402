@@ -25,7 +25,7 @@ class HTML {
 
         const fullPath = routePath + '/' + suffix
 
-        app.get( fullPath, (req, res) => {
+        app.get( '/', (req, res) => {
             const serverUrl =
                 req.protocol + '://' + req.get('host') + routePath + '/' + suffix
 
