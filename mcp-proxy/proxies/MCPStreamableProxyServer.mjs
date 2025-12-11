@@ -19,6 +19,17 @@ const JSONRPCMessageSchema = z.object({
     }).optional()
 })
 
+function escapeHtmlForSrcdoc(html) {
+    if (!html) return ''
+    return String(html)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/<\/script/gi, '<\\/script')
+}
+
 /**
  * Options for MCPStreamableProxyServer:
  *
@@ -26,32 +37,55 @@ const JSONRPCMessageSchema = z.object({
  *      Fixed default upstream URL when no ?url= parameter is provided.
  *
  * - allowedUpstreamHosts?   : string[] | null
- *      Enables dynamic upstream URLs via ?url= and defines an allowlist.
- *      Possible entries:
- *          - 'community.flowmcp.org'
- *          - 'localhost'
- *          - 'localhost:4002'
- *          - '*.flowmcp.org'   (wildcard for subdomains)
+ *      Enables dynamic upstream URLs via ?url= and defines an allowlist of hostnames
+ *      that are permitted as upstreams.
  *
- * - getX402PaymentHeader?   : (originalMessage, errorPayload, upstreamUrl) => string | null | Promise<string | null>
- *      Callback invoked on HTTP 402 (POST) which can return an X-PAYMENT header.
- *      If it returns null, the original 402 is forwarded to the client.
+ * - listenHost?             : string
+ *      Hostname or IP for the local HTTP server. Default: '127.0.0.1'.
  *
- * This class now internally creates an Express app so that you can
- * mount additional routes (e.g. HTML debug UI) before starting the server.
+ * - listenPort?             : number
+ *      Port for the local HTTP server. Default: 4001.
  *
- * Usage:
+ * - bearerToken?            : string | null
+ *      Optional Bearer token that incoming requests must include as:
+ *      Authorization: Bearer <token>
  *
- *   const proxy = new MCPStreamableProxyServer({ ...options })
- *   const app = proxy.getApp()
+ * - getX402PaymentHeader?   : (originalMessage, x402ErrorPayload, upstreamUrl) => Promise<string | null>
+ *      Optional callback to resolve a valid X-PAYMENT header for retrying
+ *      402 Payment Required responses from the upstream.
  *
- *   // Attach your HTML UI to the same Express app:
- *   HTMLTokenValidation.start({
- *       app,
- *       routePath: '/dashboard',
- *       suffix: 'token_validation',
- *       apiPath: '/api/v1/agent_payz/token_validation',
- *       allowedUpstreamHosts: [...]
+ * - silent?                 : boolean
+ *      If true, reduces console logging. Default: false.
+ *
+ * - mountPath?              : string
+ *      Express mount path prefix (e.g. '/mcp'). Default: '/mcp'.
+ *
+ * - wrapGetHtml?            : (ctx) => string | null
+ *      Optional function used to wrap upstream HTML responses for GET requests
+ *      in a custom HTML shell (e.g. metadata + <iframe> with srcdoc).
+ *      ctx includes:
+ *        - req                      : original Express request
+ *        - upstreamUrl              : string
+ *        - upstreamStatus           : number
+ *        - upstreamHeaders          : Record<string, string>
+ *        - upstreamHtml             : string
+ *        - upstreamHtmlEscaped      : string (safe for use in iframe srcdoc="")
+ *
+ * Example:
+ *
+ *   const proxy = new MCPStreamableProxyServer({
+ *       upstreamUrl: 'http://localhost:4002/mcp',
+ *       allowedUpstreamHosts: ['localhost'],
+ *       wrapGetHtml: ({ upstreamUrl, upstreamStatus, upstreamHtmlEscaped }) => `
+ *         <!doctype html>
+ *         <html>
+ *           <head>...</head>
+ *           <body>
+ *             <div>Meta...</div>
+ *             <iframe srcdoc="${upstreamHtmlEscaped}"></iframe>
+ *           </body>
+ *         </html>
+ *       `
  *   })
  *
  *   await proxy.start()
@@ -67,6 +101,7 @@ class MCPStreamableProxyServer {
     #getX402PaymentHeader
     #silent
     #mountPath
+    #wrapGetHtml
 
     constructor({
         upstreamUrl = null,
@@ -76,7 +111,8 @@ class MCPStreamableProxyServer {
         bearerToken = null,
         getX402PaymentHeader = null,
         silent = false,
-        mountPath = '/mcp'
+        mountPath = '/mcp',
+        wrapGetHtml = null
     } = {}) {
         // Express app is created immediately so callers can use getApp()
         this.#app = express()
@@ -98,6 +134,7 @@ class MCPStreamableProxyServer {
         this.#bearerToken = bearerToken
         this.#getX402PaymentHeader = getX402PaymentHeader
         this.#silent = silent
+        this.#wrapGetHtml = typeof wrapGetHtml === 'function' ? wrapGetHtml : null
 
         if (!this.#defaultUpstreamUrl && !this.#allowedUpstreamHosts) {
             throw new Error(
@@ -116,10 +153,35 @@ class MCPStreamableProxyServer {
     }
 
     /**
-     * Starts the HTTP server. This will:
-     *  - attach a catch-all Express route that forwards unmatched requests to the proxy handler
-     *  - create an http.Server from the Express app
-     *  - listen on listenHost:listenPort
+     * Returns the configured listen host.
+     */
+    getListenHost() {
+        return this.#listenHost
+    }
+
+    /**
+     * Returns the configured listen port.
+     */
+    getListenPort() {
+        return this.#listenPort
+    }
+
+    /**
+     * Returns the default upstream URL, if any.
+     */
+    getDefaultUpstreamUrl() {
+        return this.#defaultUpstreamUrl
+    }
+
+    /**
+     * Returns the upstream allowlist, if any.
+     */
+    getAllowedUpstreamHosts() {
+        return this.#allowedUpstreamHosts
+    }
+
+    /**
+     * Start the underlying HTTP server.
      */
     async start() {
         if (this.#server) {
@@ -135,12 +197,6 @@ class MCPStreamableProxyServer {
                     res.statusCode = 500
                     res.setHeader('Content-Type', 'text/plain')
                     res.end('Internal Server Error')
-                } else {
-                    try {
-                        res.end()
-                    } catch (_) {
-                        // ignore
-                    }
                 }
             })
         })
@@ -150,187 +206,190 @@ class MCPStreamableProxyServer {
         await new Promise((resolve) => {
             this.#server.listen(this.#listenPort, this.#listenHost, () => {
                 if (!this.#silent) {
-                    const upstreamInfo = this.#defaultUpstreamUrl
-                        ? `defaultUpstream=${this.#defaultUpstreamUrl.toString()}`
-                        : 'no defaultUpstream (dynamic only via ?url= and allowlist)'
-
-                    const allowInfo = this.#allowedUpstreamHosts
-                        ? `allowedUpstreamHosts=[${this.#allowedUpstreamHosts.join(', ')}]`
-                        : 'allowedUpstreamHosts=DISABLED (no dynamic ?url=)'
-
                     console.warn(
-                        `[INFO] MCP Streamable proxy listening on http://${this.#listenHost}:${this.#listenPort}${this.#mountPath}, ${upstreamInfo}, ${allowInfo}`
+                        `[MCPStreamableProxyServer] Listening on http://${this.#listenHost}:${this.#listenPort}${this.#mountPath}`
                     )
                 }
-
                 resolve()
             })
         })
     }
 
+    /**
+     * Stop the HTTP server.
+     */
+    async stop() {
+        if (!this.#server) {
+            return
+        }
 
-
-    async close() {
-        if (!this.#server) return
+        const server = this.#server
+        this.#server = undefined
 
         await new Promise((resolve, reject) => {
-            this.#server.close((err) => {
-                if (err) reject(err)
-                else resolve()
+            server.close((err) => {
+                if (err) return reject(err)
+                resolve()
             })
         })
-
-        this.#server = null
     }
 
+    /**
+     * Main request handler for all methods under mountPath.
+     */
     async #handleRequest(req, res) {
-        const method = req.method || 'GET'
-        const urlForLog = req.originalUrl || req.url || '/'
+        // Basic auth check if bearerToken is configured
+        if (this.#bearerToken) {
+            const authHeader = req.headers['authorization'] || ''
+            const token = authHeader.startsWith('Bearer ')
+                ? authHeader.slice('Bearer '.length).trim()
+                : null
 
-        if (!this.#silent) {
-            console.warn(`[DEBUG] Incoming request: ${method} ${urlForLog}`)
+            if (token !== this.#bearerToken) {
+                if (!this.#silent) {
+                    console.warn('[DEBUG] Unauthorized request (missing/invalid Bearer token)')
+                }
+                res.statusCode = 401
+                res.setHeader('Content-Type', 'text/plain')
+                res.end('Unauthorized')
+                return
+            }
         }
+
+        const method = (req.method || 'GET').toUpperCase()
 
         if (method === 'GET') {
             return this.#handleGet(req, res)
         }
 
-        if (method === 'POST' || method === 'DELETE') {
-            const body = await this.#readRequestBody(req)
-            return this.#handleWithBody(req, res, body)
+        if (method !== 'POST' && method !== 'DELETE') {
+            res.statusCode = 405
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({
+                error: 'Method Not Allowed',
+                message: `Method ${method} is not supported. Use GET for HTTP-based tools or POST/DELETE for JSON-RPC.`
+            }))
+            return
         }
 
-        res.statusCode = 405
-        res.setHeader('Content-Type', 'text/plain')
-        res.end('Method Not Allowed')
-    }
-
-    #readRequestBody(req) {
-        return new Promise((resolve, reject) => {
-            const chunks = []
-
-            req.on('data', (chunk) => {
-                chunks.push(chunk)
-            })
-
-            req.on('end', () => {
-                resolve(Buffer.concat(chunks))
-            })
-
-            req.on('error', (err) => {
-                reject(err)
-            })
+        // For POST/DELETE, buffer body fully (could be JSON-RPC)
+        const chunks = []
+        req.on('data', (chunk) => {
+            chunks.push(chunk)
         })
+
+        await new Promise((resolve) => {
+            req.on('end', resolve)
+        })
+
+        const body = Buffer.concat(chunks).toString('utf8')
+
+        return this.#handleWithBody(req, res, body)
     }
 
     /**
-     * Resolves the upstream URL for a given request.
-     *
-     * Order:
-     * 1. If ?url=<...> is set:
-     *      - only allowed if allowedUpstreamHosts is configured
-     *      - URL is parsed and checked against the allowlist
-     * 2. Otherwise: defaultUpstreamUrl from the constructor
-     *
-     * If neither is available or the allowlist rejects it -> throws an Error.
+     * Resolve upstream URL from either defaultUpstreamUrl or ?url= param.
      */
     #resolveUpstreamUrl(req) {
-        const rawUrl = req.url || '/'
-        let proxyUrl
+        const url = new URL(req.originalUrl || req.url, `http://${req.headers.host}`)
+        const rawParam = url.searchParams.get('url')
 
-        try {
-            proxyUrl = new URL(rawUrl, 'http://proxy.local')
-        } catch (err) {
-            throw new Error(`Failed to parse incoming proxy URL: ${err.message}`)
-        }
+        if (rawParam) {
+            const candidate = new URL(rawParam)
 
-        const upstreamParam = proxyUrl.searchParams.get('url')
+            if (!this.#allowedUpstreamHosts) {
+                throw new Error('Dynamic upstream URL not allowed (no allowlist configured)')
+            }
 
-        // 1) Dynamic upstream via ?url=
-        if (upstreamParam) {
-            if (!this.#allowedUpstreamHosts || this.#allowedUpstreamHosts.length === 0) {
+            const hostname = (candidate.hostname || '').toLowerCase()
+            if (!this.#allowedUpstreamHosts.includes(hostname)) {
                 throw new Error(
-                    'Dynamic upstream URLs via ?url= are disabled. ' +
-                    'Configure allowedUpstreamHosts to enable them.'
+                    `Upstream host "${hostname}" is not in the allowedUpstreamHosts allowlist.`
                 )
             }
 
-            let upstream
-            try {
-                upstream = new URL(upstreamParam)
-            } catch (err) {
-                throw new Error(`Invalid upstream URL in ?url parameter: ${err.message}`)
-            }
-
-            this.#ensureUpstreamAllowed(upstream)
-            return upstream
+            return candidate
         }
 
-        // 2) Fallback: defaultUpstreamUrl
-        if (this.#defaultUpstreamUrl) {
-            return this.#defaultUpstreamUrl
+        if (!this.#defaultUpstreamUrl) {
+            throw new Error('No upstreamUrl provided and no dynamic ?url= was specified.')
         }
 
-        throw new Error(
-            'No upstream URL: provide ?url=<encoded url> (matching allowedUpstreamHosts) ' +
-            'or configure a default upstreamUrl.'
-        )
+        return new URL(this.#defaultUpstreamUrl.toString())
     }
 
     /**
-     * Ensures that the provided upstream URL is allowed by the allowlist.
-     *
-     * Rules:
-     * - Only http/https protocols are allowed
-     * - Host must match allowedUpstreamHosts:
-     *      - exact hostnames: 'community.flowmcp.org'
-     *      - host:port       : 'localhost:4002'
-     *      - wildcard        : '*.flowmcp.org' (matches e.g. 'api.flowmcp.org')
+     * Build headers to send to the upstream.
      */
-    #ensureUpstreamAllowed(upstreamUrl) {
-        const protocol = upstreamUrl.protocol
+    #buildUpstreamHeaders(req, {
+        method,
+        acceptSSE = false
+    }) {
+        const headers = new Map()
 
-        if (protocol !== 'http:' && protocol !== 'https:') {
-            throw new Error(
-                `Upstream protocol "${protocol}" is not allowed. Only http and https are permitted.`
-            )
-        }
+        // Forward selected headers, but normalize & control encoding
+        const incoming = req.headers || {}
+        for (const [key, value] of Object.entries(incoming)) {
+            if (typeof value === 'undefined') continue
+            const lower = key.toLowerCase()
 
-        const hostname = upstreamUrl.hostname.toLowerCase()
-        const port = upstreamUrl.port || (protocol === 'https:' ? '443' : '80')
-        const hostWithPort = `${hostname}:${port}`
-
-        if (!this.#allowedUpstreamHosts || this.#allowedUpstreamHosts.length === 0) {
-            // Should not happen because caller already checks this before allowing ?url=
-            throw new Error('No allowedUpstreamHosts configured.')
-        }
-
-        const isAllowed = this.#allowedUpstreamHosts.some((patternRaw) => {
-            const pattern = patternRaw.toLowerCase().trim()
-            if (!pattern) return false
-
-            // Wildcard: *.example.com
-            if (pattern.startsWith('*.')) {
-                const suffix = pattern.slice(1) // e.g. '.flowmcp.org'
-                // Host must end with suffix and must not be exactly the suffix without star
-                return hostname.endsWith(suffix) && hostname !== suffix.slice(1)
+            // Skip hop-by-hop headers
+            if (['connection', 'keep-alive', 'transfer-encoding'].includes(lower)) {
+                continue
             }
 
-            // Exact hostname
-            if (hostname === pattern) return true
+            // We'll control encoding explicitly
+            if (['accept-encoding'].includes(lower)) {
+                continue
+            }
 
-            // Host:Port
-            if (hostWithPort === pattern) return true
+            // We'll handle Host
+            if (lower === 'host') {
+                continue
+            }
 
-            return false
-        })
-
-        if (!isAllowed) {
-            throw new Error(
-                `Upstream host "${hostWithPort}" is not in allowedUpstreamHosts ` +
-                `(${this.#allowedUpstreamHosts.join(', ')}).`
-            )
+            // For Authorization: allow forwarding but don't override if upstream has special config
+            headers.set(lower, value)
         }
+
+        // Force identity encoding so we can safely buffer/stream as needed
+        headers.set('accept-encoding', 'identity')
+
+        // Ensure JSON content-type for JSON-RPC
+        if (method === 'POST' || method === 'DELETE') {
+            if (!headers.has('content-type')) {
+                headers.set('content-type', 'application/json')
+            }
+        }
+
+        // Default Accept if not provided
+        if (!headers.has('accept')) {
+            headers.set('accept', '*/*')
+        }
+
+        // Ensure we don't forward any existing X-PAYMENT header,
+        // as we'll want to manage X402 retries explicitly.
+        headers.delete('x-payment')
+
+        // Set protocol version
+        if (!headers.has('mcp-protocol-version')) {
+            headers.set('mcp-protocol-version', DEFAULT_PROTOCOL_VERSION)
+        }
+
+        // For GET: ensure text/event-stream is accepted
+        if (acceptSSE) {
+            const existing = headers.get('accept') || ''
+            const parts = new Set(
+                existing
+                    .split(',')
+                    .map((v) => v.trim())
+                    .filter(Boolean)
+            )
+            parts.add('text/event-stream')
+            headers.set('accept', Array.from(parts).join(', '))
+        }
+
+        return headers
     }
 
     async #handleGet(req, res) {
@@ -363,16 +422,50 @@ class MCPStreamableProxyServer {
             signal
         })
 
+        const contentType = upstreamResponse.headers.get('content-type') || ''
+
         if (!this.#silent) {
             console.warn(
                 '[DEBUG] Upstream GET response:',
                 upstreamResponse.status,
-                upstreamResponse.headers.get('content-type'),
+                contentType,
                 'from',
                 upstreamUrl.toString()
             )
         }
 
+        // If a wrapGetHtml function is configured and the upstream responds with HTML,
+        // let the wrapper render a full HTML document (e.g. metadata + iframe).
+        if (this.#wrapGetHtml && contentType.includes('text/html')) {
+            const upstreamHtml = await upstreamResponse.text()
+
+            const ctx = {
+                req,
+                upstreamUrl: upstreamUrl.toString(),
+                upstreamStatus: upstreamResponse.status,
+                upstreamHeaders: Object.fromEntries(upstreamResponse.headers.entries()),
+                upstreamHtml,
+                upstreamHtmlEscaped: escapeHtmlForSrcdoc(upstreamHtml)
+            }
+
+            let wrappedHtml
+            try {
+                wrappedHtml = this.#wrapGetHtml(ctx)
+            } catch (err) {
+                console.warn('[DEBUG] wrapGetHtml threw an error, falling back to direct proxying:', err)
+            }
+
+            if (typeof wrappedHtml === 'string' && wrappedHtml.length > 0) {
+                const buf = Buffer.from(wrappedHtml, 'utf8')
+                res.statusCode = 200 // or preserve ctx.upstreamStatus if desired
+                res.setHeader('Content-Type', 'text/html; charset=utf-8')
+                res.setHeader('Content-Length', String(buf.length))
+                res.end(buf)
+                return
+            }
+        }
+
+        // Fallback: behave like a normal transparent proxy.
         await this.#pipeUpstreamResponse(upstreamResponse, res)
     }
 
@@ -401,51 +494,73 @@ class MCPStreamableProxyServer {
 
         if (!this.#silent && body?.length) {
             try {
-                const parsed = JSON.parse(body.toString('utf8'))
-                const msg = JSONRPCMessageSchema.parse(parsed)
-                console.warn('[DEBUG] Incoming JSON-RPC message from client:', msg)
+                const parsed = JSON.parse(body)
+                console.warn('[DEBUG] Upstream JSON-RPC request:', parsed)
             } catch (err) {
-                console.warn('[DEBUG] Failed to parse incoming JSON as JSON-RPC:', err)
+                console.warn('[DEBUG] Request body is not valid JSON:', err)
             }
         }
 
         const headers = this.#buildUpstreamHeaders(req, {
             method,
-            ensureStreamableAccept: true
+            acceptSSE: false
         })
 
-        let upstreamResponse = await fetch(upstreamUrl, {
-            method,
-            headers,
-            body,
-            signal
-        })
+        let attempt = 0
+        let lastError
 
-        if (!this.#silent) {
-            console.warn(
-                '[DEBUG] Upstream POST/DELETE response:',
-                upstreamResponse.status,
-                upstreamResponse.headers.get('content-type'),
-                'from',
-                upstreamUrl.toString()
-            )
-        }
+        while (attempt < 2) {
+            attempt += 1
 
-        // 402 Payment Required Handling (X402)
-        if (upstreamResponse.status === 402 && this.#getX402PaymentHeader && method === 'POST') {
-            let errorPayload = null
-            let originalMessage = null
-
-            try {
-                errorPayload = await upstreamResponse.json()
-            } catch (err) {
-                console.warn('[x402] Failed to parse 402 JSON payload:', err)
+            const requestInit = {
+                method,
+                headers,
+                body,
+                signal
             }
 
+            let upstreamResponse
             try {
-                if (body?.length) {
-                    originalMessage = JSON.parse(body.toString('utf8'))
+                upstreamResponse = await fetch(upstreamUrl, requestInit)
+            } catch (err) {
+                lastError = err
+                console.warn('[DEBUG] Upstream fetch error:', err)
+                break
+            }
+
+            if (!this.#silent) {
+                console.warn(
+                    '[DEBUG] Upstream response:',
+                    upstreamResponse.status,
+                    upstreamResponse.headers.get('content-type'),
+                    'from',
+                    upstreamUrl.toString()
+                )
+            }
+
+            if (upstreamResponse.status !== 402 || !this.#getX402PaymentHeader) {
+                await this.#pipeUpstreamResponse(upstreamResponse, res)
+                return
+            }
+
+            let errorPayload = null
+            try {
+                const cloned = upstreamResponse.clone()
+                const text = await cloned.text()
+                try {
+                    // Try JSON first
+                    errorPayload = JSON.parse(text)
+                } catch {
+                    // Fallback to raw text
+                    errorPayload = { raw: text }
                 }
+            } catch (err) {
+                console.warn('[x402] Failed to read upstream 402 body:', err)
+            }
+
+            let originalMessage = null
+            try {
+                originalMessage = JSON.parse(body || '{}')
             } catch (err) {
                 console.warn('[x402] Failed to parse original request body as JSON:', err)
             }
@@ -460,187 +575,70 @@ class MCPStreamableProxyServer {
                 )
 
                 if (header) {
-                    console.warn('[x402] Retrying upstream request with X-PAYMENT header.')
-
-                    const retryHeaders = this.#buildUpstreamHeaders(req, {
-                        method,
-                        ensureStreamableAccept: true
-                    })
-
-                    retryHeaders.set('X-PAYMENT', header)
-
-                    upstreamResponse = await fetch(upstreamUrl, {
-                        method,
-                        headers: retryHeaders,
-                        body,
-                        signal
-                    })
-
-                    if (!upstreamResponse.ok && upstreamResponse.status !== 202) {
-                        console.warn(
-                            `[x402] Retry failed: HTTP ${upstreamResponse.status} ${upstreamResponse.statusText}`
-                        )
-                    }
+                    console.warn('[x402] Retrying upstream request with X-PAYMENT header')
+                    headers.set('x-payment', header)
+                    // Try again with same body/method, but with X-PAYMENT header in place
+                    continue
                 } else {
-                    console.warn('[x402] getX402PaymentHeader returned no header, forwarding original 402 to client.')
+                    console.warn('[x402] No X-PAYMENT header provided, returning original 402 to client.')
                 }
             } catch (err) {
-                console.warn('[x402] Error during payment header handling, forwarding original 402:', err)
-            }
-        }
-
-        await this.#pipeUpstreamResponse(upstreamResponse, res)
-    }
-
-    #buildUpstreamHeaders(req, {
-        method,
-        acceptSSE = false,
-        ensureStreamableAccept = false
-    } = {}) {
-        const headers = new Headers()
-        headers.set('accept-encoding', 'identity')
-
-        // Forward incoming headers (except some hop-by-hop ones)
-        for (const [name, value] of Object.entries(req.headers)) {
-            if (!value) continue
-
-            const lower = name.toLowerCase()
-
-            if (lower === 'host') continue
-            if (lower === 'connection') continue
-            if (lower === 'content-length') continue
-            if (lower === 'accept-encoding') continue
-
-            if (Array.isArray(value)) {
-                headers.set(name, value.join(', '))
-            } else {
-                headers.set(name, String(value))
-            }
-        }
-
-        // Optional static bearer token configured on the proxy itself
-        if (this.#bearerToken) {
-            headers.set('Authorization', `Bearer ${this.#bearerToken}`)
-        }
-
-        // Ensure MCP protocol version
-        if (!headers.has('mcp-protocol-version')) {
-            headers.set('mcp-protocol-version', DEFAULT_PROTOCOL_VERSION)
-        }
-
-        // For GET: ensure text/event-stream is accepted
-        if (acceptSSE) {
-            const existing = headers.get('accept') || ''
-            const parts = new Set(
-                existing
-                    .split(',')
-                    .map((v) => v.trim())
-                    .filter(Boolean)
-            )
-            parts.add('text/event-stream')
-            headers.set('accept', Array.from(parts).join(', '))
-        }
-
-        // For POST/DELETE: ensure application/json + text/event-stream in Accept
-        if (ensureStreamableAccept && (method === 'POST' || method === 'DELETE')) {
-            const existing = headers.get('accept') || ''
-            const parts = new Set(
-                existing
-                    .split(',')
-                    .map((v) => v.trim())
-                    .filter(Boolean)
-            )
-            parts.add('application/json')
-            parts.add('text/event-stream')
-            headers.set('accept', Array.from(parts).join(', '))
-        }
-
-        return headers
-    }
-
-    async #pipeUpstreamResponse(upstreamResponse, res) {
-        const status = upstreamResponse.status
-        const contentType = upstreamResponse.headers.get('content-type') || ''
-
-        // Copy upstream headers, filtering out problematic ones
-        const headers = {}
-
-        upstreamResponse.headers.forEach((value, name) => {
-            const lower = name.toLowerCase()
-
-            if (lower === 'transfer-encoding') return
-            if (lower === 'connection') return
-            if (lower === 'keep-alive') return
-            if (lower === 'content-length') return
-            if (lower === 'content-encoding') return   // <--- NEU
-
-            headers[name] = value
-        })
-
-        // SSE stream -> pipe directly
-        if (contentType.includes('text/event-stream')) {
-            headers['Content-Type'] = 'text/event-stream'
-
-            if (!headers['Cache-Control']) {
-                headers['Cache-Control'] = 'no-cache'
+                console.warn('[x402] getX402PaymentHeader threw an error:', err)
+                lastError = err
             }
 
-            headers['Connection'] = 'keep-alive'
-
-            res.writeHead(status, headers)
-
-            const body = upstreamResponse.body
-
-            if (!body) {
-                res.end()
-                return
-            }
-
-            const reader = body.getReader()
-
-            try {
-                while (true) {
-                    const { value, done } = await reader.read()
-
-                    if (done) break
-                    if (value) {
-                        res.write(Buffer.from(value))
-                    }
-                }
-            } catch (err) {
-                console.warn('[DEBUG] Error while piping SSE upstream response:', err)
-            } finally {
-                res.end()
-            }
-
+            // If we reached here, we couldn't resolve payment or an error occurred.
+            // Return the original 402 response to the client.
+            await this.#pipeUpstreamResponse(upstreamResponse, res)
             return
         }
 
-        // 202 Accepted with optional small body
-        if (status === 202) {
-            res.writeHead(status, headers)
+        if (!res.headersSent) {
+            res.statusCode = 502
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({
+                error: 'Bad Gateway',
+                message: lastError ? String(lastError.message || lastError) : 'Unknown upstream error'
+            }))
+        }
+    }
 
-            if (upstreamResponse.body) {
-                try {
-                    const arrBuf = await upstreamResponse.arrayBuffer()
-                    const buf = Buffer.from(arrBuf)
-                    if (buf.length) {
-                        res.write(buf)
-                    }
-                } catch (_) {
-                    // Ignore – 202 normally has no body
-                }
+    /**
+     * Pipes the upstream response to the client, buffering the body so we can inspect or log it.
+     */
+    async #pipeUpstreamResponse(upstreamResponse, res) {
+        const status = upstreamResponse.status
+        const headers = {}
+
+        for (const [key, value] of upstreamResponse.headers.entries()) {
+            const lower = key.toLowerCase()
+
+            // Skip hop-by-hop headers
+            if (['connection', 'keep-alive', 'transfer-encoding'].includes(lower)) {
+                continue
             }
 
+            headers[key] = value
+        }
+
+        const contentType = upstreamResponse.headers.get('content-type') || ''
+
+        // If it's text/event-stream, we want to stream it directly.
+        if (contentType.includes('text/event-stream')) {
+            res.writeHead(status, headers)
+            for await (const chunk of upstreamResponse.body) {
+                res.write(chunk)
+            }
             res.end()
             return
         }
 
-        // Everything else: buffer the body and send once
-        const arrBuf = upstreamResponse.body
-            ? await upstreamResponse.arrayBuffer()
-            : new ArrayBuffer(0)
-
+        // Otherwise, buffer the response fully.
+        const chunks = []
+        for await (const chunk of upstreamResponse.body) {
+            chunks.push(chunk)
+        }
+        const arrBuf = Buffer.concat(chunks)
         const buf = Buffer.from(arrBuf)
 
         if (contentType && !headers['Content-Type']) {

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="de" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <title>Coming Soon – Newsletter</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Tailwind per CDN (für kleine Projekte ok) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="h-full bg-gray-950 text-white">
+    <div class="min-h-screen flex items-center justify-center px-6">
+      <div class="bg-white dark:bg-gray-900 py-16 sm:py-24 lg:py-32 rounded-2xl shadow-lg w-full max-w-3xl">
+        <div class="mx-auto max-w-2xl px-6 lg:px-8 text-center">
+          <p class="text-sm font-semibold tracking-wide text-indigo-500 uppercase">
+            Coming Soon
+          </p>
+          <h1 class="mt-4 text-3xl font-semibold tracking-tight text-gray-900 sm:text-4xl dark:text-white">
+            Wir arbeiten an etwas Neuem.  
+            Bleib auf dem Laufenden.
+          </h1>
+          <p class="mt-4 text-sm text-gray-700 dark:text-gray-300">
+            Trag deine E-Mail ein und wir melden uns, sobald wir live sind.
+          </p>
+
+          <form class="mt-10 max-w-md mx-auto">
+            <div class="flex flex-col sm:flex-row gap-3 sm:gap-x-4">
+              <label for="email-address" class="sr-only">E-Mail-Adresse</label>
+              <input
+                id="email-address"
+                type="email"
+                name="email"
+                required
+                placeholder="Deine E-Mail-Adresse"
+                autocomplete="email"
+                class="min-w-0 flex-auto rounded-md bg-white px-3.5 py-2 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600 sm:text-sm/6 dark:bg-white/5 dark:text-white dark:outline-gray-700 dark:focus:outline-indigo-500"
+              />
+              <button
+                type="submit"
+                class="flex-none rounded-md bg-indigo-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400 dark:focus-visible:outline-indigo-500"
+              >
+                Benachrichtige mich
+              </button>
+            </div>
+            <p class="mt-4 text-sm/6 text-gray-900 dark:text-gray-300">
+              Wir behandeln deine Daten vertraulich. Lies unsere
+              <a href="#" class="font-semibold whitespace-nowrap text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300">Datenschutzerklärung</a>.
+            </p>
+          </form>
+
+          <p class="mt-8 text-xs text-gray-500 dark:text-gray-500">
+            © <span id="year"></span> Deine Marke – Alle Rechte vorbehalten.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // aktuelles Jahr einsetzen
+      document.getElementById("year").textContent = new Date().getFullYear();
+      // Dark-Mode aktivieren, wenn du ihn willst:
+      // document.documentElement.classList.add('dark');
+    </script>
+  </body>
+</html>
