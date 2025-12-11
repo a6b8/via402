@@ -6,9 +6,8 @@ import { ServerManager } from './helpers/ServerManager.mjs'
 const { port: listenPort } = ServerManager
     .getArgs( { argv: process.argv } )
 
-
 const proxy = new MCPStreamableProxyServer( {
-    listenHost: 'localhost',
+    listenHost: '0.0.0.0',
     listenPort,
     upstreamUrl: null,
     allowedUpstreamHosts: [
