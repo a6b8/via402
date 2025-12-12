@@ -1,6 +1,6 @@
 import fs from 'fs'
 import { FlowMCP } from 'flowmcp'
-import { RemoteServer } from 'flowmcpServers'
+import { RemoteServer } from './flowmcpServers/src/index.mjs'
 import { schema as avax } from './schemas/avax.mjs'
 import { schema as devToolsSchema } from './schemas/dev-tools.mjs'
 
@@ -112,5 +112,4 @@ HTML.start({
 })
 remoteServer
     .start( { routesActivationPayloads } )
-
 
