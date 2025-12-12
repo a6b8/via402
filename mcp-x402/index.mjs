@@ -32,6 +32,21 @@ const config = {
                 'method': 'tools/call',
                 'name': 'paid_ping_x402',
                 'activePaymentOptions': [ 'usdc-fuji' ],
+            },
+            {
+                'method': 'tools/call',
+                'name': 'getActivityEVM_simdune',
+                'activePaymentOptions': [ 'usdc-fuji' ],
+            },
+            {
+                'method': 'tools/call',
+                'name': 'getTokenHoldersEVM_simdune',
+                'activePaymentOptions': [ 'usdc-fuji' ],
+            },
+            {
+                'method': 'tools/call',
+                'name': 'getCollectiblesEVM_simdune',
+                'activePaymentOptions': [ 'usdc-fuji' ],
             }
         ],
         'paymentOptions': {
