@@ -12,7 +12,7 @@ const getParam = (userParams, key) => userParams?.[key] ?? userParams?._allParam
 const getChainIdByAlias = (alias) => SUPPORTED_CHAINS.find((c) => c.alias === alias)?.id;
 
 const schema = {
-    namespace: "simdune",
+    namespace: "avax",
     name: "Sim by Dune - Avalanche Only",
     description: "Combined Sim by Dune schema containing all provided EVM routes, restricted to Avalanche Mainnet (C-Chain) or Avalanche Fuji.",
     docs: [
