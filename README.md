@@ -28,7 +28,7 @@ The demo runs entirely on **Avalanche Fuji testnet**. Users can log in, call MCP
 ---
 
 ## What via402 does
-
+ 
 AI agents are good at calling tools. They are not good at paying for them.
 
 Some MCP tools are free. Others require payment. Most AI clients intentionally avoid handling payments, which makes paid APIs inaccessible to autonomous agents. via402 removes that constraint.
