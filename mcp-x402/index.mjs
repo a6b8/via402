@@ -8,6 +8,7 @@ import { X402Middleware } from 'x402-mcp-middleware'
 import { ServerManager } from './helpers/ServerManager.mjs'
 import { HTML } from './helpers/HTML.mjs'
 
+
 const config = {
     'silent': false,
     'envPath': './../.via402.env',
@@ -34,28 +35,38 @@ const config = {
             {
                 'method': 'tools/call',
                 'name': 'paid_ping_x402',
-                'activePaymentOptions': [ 'usdc-fuji' ],
+                'activePaymentOptions': [ 'usdc-fuji-cheap' ],
             },
             {
                 'method': 'tools/call',
                 'name': 'getActivityEVM_avax',
-                'activePaymentOptions': [ 'usdc-fuji' ],
+                'activePaymentOptions': [ 'usdc-fuji-standard' ],
             },
             {
                 'method': 'tools/call',
                 'name': 'getTokenHoldersEVM_avax',
-                'activePaymentOptions': [ 'usdc-fuji' ],
+                'activePaymentOptions': [ 'usdc-fuji-premium' ],
             },
             {
                 'method': 'tools/call',
                 'name': 'getCollectiblesEVM_avax',
-                'activePaymentOptions': [ 'usdc-fuji' ],
+                'activePaymentOptions': [ 'usdc-fuji-standard' ],
             }
         ], 
         'paymentOptions': {
-            'usdc-fuji': { 
+            'usdc-fuji-cheap': { 
                 'contractId': 'usdc-fuji',
                 'maxAmountRequired': '0.0001',
+                'payTo': '{{recepientAddress}}',
+            },
+            'usdc-fuji-standard': { 
+                'contractId': 'usdc-fuji',
+                'maxAmountRequired': '0.005',
+                'payTo': '{{recepientAddress}}',
+            },
+            'usdc-fuji-premium': { 
+                'contractId': 'usdc-fuji',
+                'maxAmountRequired': '0.0777',
                 'payTo': '{{recepientAddress}}',
             }
         },
@@ -68,6 +79,21 @@ const config = {
             }
         }
     }
+}
+
+
+function bugFixContractIds( { paymentOptions, contracts } ) {
+    const contractsWithAliases = Object
+        .keys( paymentOptions )
+        .reduce( ( acc, paymentOptionId ) => {
+            const baseId = paymentOptions[ paymentOptionId ].contractId
+            if( baseId && contracts[ baseId ] ) {
+                acc[ paymentOptionId ] = contracts[ baseId ]
+            }
+            return acc
+        }, { ...contracts } )
+
+    return { contractsWithAliases }
 }
 
 
@@ -88,6 +114,9 @@ const objectOfSchemaArrays = arrayOfRoutes
         return acc
     }, {} )
 
+// Ensure contracts can be looked up by the payment option keys (the middleware currently uses the payment option id for the lookup)
+
+
 const remoteServer = new RemoteServer( { silent } )
 const app = remoteServer.getApp()
 
@@ -95,10 +124,11 @@ remoteServer
     .setConfig( { overwrite: { port: parseInt( port ) } } )
 const { routesActivationPayloads } = RemoteServer
     .prepareRoutesActivationPayloads( { arrayOfRoutes, objectOfSchemaArrays, envObject } )
+const contractsWithAliases = bugFixContractIds( { paymentOptions, contracts } )
 const middleware = await X402Middleware
-    .create( { chainId, chainName, contracts, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } )
+    .create( { chainId, chainName, contracts: contractsWithAliases, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } )
 app.use( ( middleware ).mcp() )
-HTML.start({
+HTML.start( {
     app,
     routePath,
     suffix: 'streamable',
@@ -109,7 +139,6 @@ HTML.start({
     facilitatorPublicKey: x402Credentials.facilitatorPublicKey,
     payToAddress: x402Credentials.recepientAddress,
     explorerAddressBaseUrl: snowtraceAddressBaseUrl
-})
+} )
 remoteServer
     .start( { routesActivationPayloads } )
-
