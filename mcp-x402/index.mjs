@@ -38,17 +38,17 @@ const config = {
             },
             {
                 'method': 'tools/call',
-                'name': 'getActivityEVM_simdune',
+                'name': 'getActivityEVM_avax',
                 'activePaymentOptions': [ 'usdc-fuji' ],
             },
             {
                 'method': 'tools/call',
-                'name': 'getTokenHoldersEVM_simdune',
+                'name': 'getTokenHoldersEVM_avax',
                 'activePaymentOptions': [ 'usdc-fuji' ],
             },
             {
                 'method': 'tools/call',
-                'name': 'getCollectiblesEVM_simdune',
+                'name': 'getCollectiblesEVM_avax',
                 'activePaymentOptions': [ 'usdc-fuji' ],
             }
         ],
