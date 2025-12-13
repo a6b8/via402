@@ -124,7 +124,7 @@ remoteServer
     .setConfig( { overwrite: { port: parseInt( port ) } } )
 const { routesActivationPayloads } = RemoteServer
     .prepareRoutesActivationPayloads( { arrayOfRoutes, objectOfSchemaArrays, envObject } )
-const contractsWithAliases = bugFixContractIds( { paymentOptions, contracts } )
+const { contractsWithAliases } = bugFixContractIds( { paymentOptions, contracts } )
 const middleware = await X402Middleware
     .create( { chainId, chainName, contracts: contractsWithAliases, paymentOptions, restrictedCalls, x402Credentials, x402PrivateKey } )
 app.use( ( middleware ).mcp() )
