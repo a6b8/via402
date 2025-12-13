@@ -2,6 +2,13 @@ import fs from 'fs'
 
 
 class ServerManager {
+    static getNpmPackageVersion( { path } ) {
+        const packageJsonContent = fs.readFileSync( path, 'utf-8' )
+        const { version } = JSON.parse( packageJsonContent )
+        return { version }
+    }
+
+
     static getArgs( { argv } ) {
         const requiredArgs = [ 'port', 'environment' ]
 

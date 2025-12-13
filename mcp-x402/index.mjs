@@ -7,6 +7,7 @@ import { schema as devToolsSchema } from './schemas/dev-tools.mjs'
 import { X402Middleware } from 'x402-mcp-middleware'
 import { ServerManager } from './helpers/ServerManager.mjs'
 import { HTML } from './helpers/HTML.mjs'
+import { Server } from 'http'
 
 
 const config = {
@@ -99,6 +100,11 @@ function bugFixContractIds( { paymentOptions, contracts } ) {
 
 const { silent, envPath, envSelection, arrayOfRoutes, x402, snowtraceAddressBaseUrl } = config
 const { routePath, chainId, chainName, restrictedCalls, paymentOptions, contracts } = x402
+
+
+const { version } = ServerManager
+    .getNpmPackageVersion( { 'path': './package.json' } )
+console.log( `Starting MCP X402 Server - Version ${version}` ) 
 
 const { port, environment } = ServerManager
     .getArgs( { argv: process.argv } )
