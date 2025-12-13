@@ -40,17 +40,17 @@ const config = {
             },
             {
                 'method': 'tools/call',
-                'name': 'getActivityEVM_avax',
+                'name': 'get_activity_evm_avax',
                 'activePaymentOptions': [ 'usdc-fuji-standard' ],
             },
             {
                 'method': 'tools/call',
-                'name': 'getTokenHoldersEVM_avax',
+                'name': 'get_token_holders_evm_avax',
                 'activePaymentOptions': [ 'usdc-fuji-premium' ],
             },
             {
                 'method': 'tools/call',
-                'name': 'getCollectiblesEVM_avax',
+                'name': 'get_collectibles_evm_avax',
                 'activePaymentOptions': [ 'usdc-fuji-standard' ],
             }
         ], 

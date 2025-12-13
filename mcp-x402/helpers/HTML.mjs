@@ -15,11 +15,22 @@ class HTML {
         const { namespace } = schema
         const tools = Object
             .keys( schema['routes'] )
-            .map( routeName => ( { 'name': routeName + `_${namespace}`, 'protected': null } ) )
-            .map( tool => { 
+            .map( ( routeName ) => {
+                const routeNameSnakeCase = routeName
+                    .replace( /([a-z0-9])([A-Z])/g, '$1_$2' )
+                    .toLowerCase()
+                const suffixSnakeCase = namespace
+                    .replace( /([a-z0-9])([A-Z])/g, '$1_$2' )
+                    .toLowerCase()
+                const name = `${routeNameSnakeCase}_${suffixSnakeCase}`
+
+                return { name, 'protected': null }
+            } )
+            .map( ( tool ) => {
                 const isProtected = restrictedCalls
-                    .some( rc => rc['name'] === tool.name )
+                    .some( ( rc ) => rc['name'] === tool.name )
                 tool.protected = isProtected
+
                 return tool
             } )
 
